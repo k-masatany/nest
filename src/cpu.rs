@@ -56,7 +56,7 @@ pub enum AddressingMode {
 }
 
 // メモリ操作の定義
-trait Mem {
+pub trait Mem {
     fn mem_read(&self, addr: u16) -> u8;
 
     fn mem_write(&mut self, addr: u16, data: u8);
@@ -119,8 +119,8 @@ impl CPU {
 
     // プログラムロード
     pub fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.mem_write_u16(0xFFFC, 0x8000);
+        self.memory[0x0600..(0x0600 + program.len())].copy_from_slice(&program[..]);
+        self.mem_write_u16(0xFFFC, 0x0600);
     }
 
     // プログラム読み出しと実行
@@ -139,10 +139,18 @@ impl CPU {
             self.status.remove(CpuFlags::ZERO);
         }
 
-        if result & 0b1000_0000 != 0 {
+        if result >> 7 == 1 {
             self.status.insert(CpuFlags::NEGATIV);
         } else {
             self.status.remove(CpuFlags::NEGATIV);
+        }
+    }
+
+    fn update_negative_flags(&mut self, result: u8) {
+        if result >> 7 == 1 {
+            self.status.insert(CpuFlags::NEGATIV)
+        } else {
+            self.status.remove(CpuFlags::NEGATIV)
         }
     }
 
@@ -411,7 +419,7 @@ impl CPU {
             data = data | 1;
         }
         self.mem_write(addr, data);
-        self.update_zero_and_negative_flags(data);
+        self.update_negative_flags(data);
         data
     }
 
@@ -446,7 +454,7 @@ impl CPU {
             data = data | 0b10000000;
         }
         self.mem_write(addr, data);
-        self.update_zero_and_negative_flags(data);
+        self.update_negative_flags(data);
         data
     }
 
@@ -555,6 +563,13 @@ impl CPU {
 
     // プログラムの実行
     pub fn run(&mut self) {
+        self.run_with_callback(|_| {});
+    }
+
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where
+        F: FnMut(&mut CPU),
+    {
         // 定義済みの命令セットをロード
         let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
@@ -566,10 +581,8 @@ impl CPU {
             self.program_counter += 1;
             // 後でプログラムカウンタの値を判定に使うので一時的に保持しておく
             let program_counter_state = self.program_counter;
-            // 命令セットから命令を取得（見つからなければエラー）
-            let opcode = opcodes
-                .get(&code)
-                .expect(&format!("OpCode {:x} is not recognized", code));
+            // 命令セットから命令を取得
+            let opcode = opcodes.get(&code).unwrap();
 
             // 命令の実行
             match code {
@@ -860,6 +873,8 @@ impl CPU {
             if program_counter_state == self.program_counter {
                 self.program_counter += (opcode.len - 1) as u16;
             }
+
+            callback(self);
         }
     }
 }
